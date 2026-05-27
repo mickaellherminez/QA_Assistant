@@ -88,7 +88,6 @@ L'agent génère automatiquement, en **~15 secondes** :
 | Temps / US (6 TC) | 2–4 h | ~15 s | ×480–×960 |
 | Couverture techniques ISTQB | Variable | Systématique | ✅ |
 | Traçabilité US → TC | Manuelle | Automatique | ✅ |
-| Détection d'ambiguïtés | Ad hoc | Structurée | ✅ |
 
 > Les cas de test restent soumis à validation humaine. L'agent accélère la rédaction, pas la responsabilité QA.
 
