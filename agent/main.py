@@ -12,11 +12,19 @@ Cycle d'exécution :
   8. Filtrer les données sensibles (output_filter).
   9. Stocker la réponse en mémoire.
   10. Retourner la réponse.
+
+Langfuse :
+  Chaque étape clé est encapsulée dans un span @observe().
+  La fonction agent() est la trace racine ; session_id et tags (intent, status)
+  sont propagés à tous les spans enfants via propagate_attributes().
 """
 
 import logging
 import os
 import re
+
+# ⚠️  Importer tracing avant les modules LLM pour que le contexte soit prêt.
+from tracing import observe, propagate_attributes
 
 from llm import call_llm_json
 from memory.short_term import store, recall, clear  # noqa: F401 (clear ré-exporté)
@@ -48,6 +56,7 @@ _US_INDEX_PATTERN = re.compile(r"\bUS-\d{3,}\b", re.IGNORECASE)
 
 # ── Fonctions internes ────────────────────────────────────────────────────────
 
+@observe(name="classify-intent")
 def _classify_intent(query: str) -> dict:
     """
     Identifie l'intention de la requête utilisateur.
@@ -136,6 +145,7 @@ def _build_messages(
     return messages
 
 
+@observe(name="fetch-user-stories")
 def _fetch_relevant_us(query: str, intent: str) -> list[dict]:
     """
     Récupère les user stories pertinentes selon la requête et l'intent.
@@ -183,12 +193,14 @@ def _build_rag_query(us_list: list[dict]) -> str:
 
 # ── Fonction principale ───────────────────────────────────────────────────────
 
-def agent(query: str) -> dict:
+@observe(name="qa-agent")
+def agent(query: str, session_id: str | None = None) -> dict:
     """
     Point d'entrée principal de l'agent QA.
 
     Args:
-        query: requête de l'utilisateur (texte libre)
+        query:      requête de l'utilisateur (texte libre)
+        session_id: identifiant de session optionnel (propagé à Langfuse)
 
     Returns:
         dict JSON structuré conforme au schéma de l'agent.
@@ -214,65 +226,73 @@ def agent(query: str) -> dict:
     # 2. Stocker la requête
     store({"role": "user", "content": query})
 
-    # 4. Classifier l'intention
+    # 3. Classifier l'intention (span Langfuse enfant)
     intent_result = _classify_intent(query)
     intent = intent_result.get("intent", "general")
     logger.info("Intent : %s (confiance : %s)", intent, intent_result.get("confidence"))
 
-    # 5. Rappeler le contexte (hors message courant)
-    context = recall(limit=5)[:-1]  # on exclut le message qu'on vient de stocker
+    # Attacher session_id, intent et tags à la trace Langfuse courante
+    with propagate_attributes(
+        trace_name="qa-agent",
+        session_id=session_id,
+        tags=[f"intent:{intent}", "qa-assistant"],
+        metadata={"intent": intent, "confidence": intent_result.get("confidence")},
+    ):
+        # 4. Rappeler le contexte (hors message courant)
+        context = recall(limit=5)[:-1]  # on exclut le message qu'on vient de stocker
 
-    # 6. Récupérer les user stories pertinentes
-    us_list = _fetch_relevant_us(query, intent)
-    logger.info("US chargées : %d", len(us_list))
+        # 5. Récupérer les user stories pertinentes (span Langfuse enfant)
+        us_list = _fetch_relevant_us(query, intent)
+        logger.info("US chargées : %d", len(us_list))
 
-    # 7. RAG — récupérer les bonnes pratiques ISTQB pertinentes
-    # La query RAG est construite à partir du contenu des US (plus précis que la requête brute)
-    rag_context = ""
-    if us_list and intent in ("generate_tests", "analyze_story", "detect_ambiguities"):
-        rag_query = _build_rag_query(us_list)
-        chunks = retrieve(rag_query)
-        rag_context = build_rag_context(chunks)
-        logger.info("RAG — %d chunks ISTQB injectés", len(chunks))
+        # 6. RAG — récupérer les bonnes pratiques ISTQB pertinentes
+        # (span Langfuse enfant défini dans rag/retrieve.py)
+        rag_context = ""
+        if us_list and intent in ("generate_tests", "analyze_story", "detect_ambiguities"):
+            rag_query = _build_rag_query(us_list)
+            chunks = retrieve(rag_query)
+            rag_context = build_rag_context(chunks)
+            logger.info("RAG — %d chunks ISTQB injectés", len(chunks))
 
-    # 8. Construire les messages et appeler le LLM
-    messages = _build_messages(query, context, us_list, intent, rag_context)
+        # 7. Construire les messages et appeler le LLM
+        # (CallbackHandler Langfuse attaché automatiquement dans call_llm)
+        messages = _build_messages(query, context, us_list, intent, rag_context)
 
-    schema = (
-        '{"status":"success|error|clarification_needed|out_of_scope",'
-        '"intent":"generate_tests|analyze_story|detect_ambiguities|general|out_of_scope",'
-        '"answer":"...","test_cases":[],"ambiguities":[],'
-        '"sources":[],"warnings":[],"requires_human_validation":true}'
-    )
+        schema = (
+            '{"status":"success|error|clarification_needed|out_of_scope",'
+            '"intent":"generate_tests|analyze_story|detect_ambiguities|general|out_of_scope",'
+            '"answer":"...","test_cases":[],"ambiguities":[],'
+            '"sources":[],"warnings":[],"requires_human_validation":true}'
+        )
 
-    try:
-        response = call_llm_json(messages, schema_hint=schema)
-    except RuntimeError as e:
-        logger.error("Erreur LLM : %s", e)
-        error_response = {
-            "status": "error",
-            "intent": intent,
-            "answer": "Une erreur est survenue lors de la génération. Veuillez réessayer.",
-            "test_cases": [],
-            "ambiguities": [],
-            "sources": [],
-            "warnings": [str(e)],
-            "requires_human_validation": True,
-        }
-        store({"role": "assistant", "content": error_response["answer"]})
-        return error_response
+        try:
+            response = call_llm_json(messages, schema_hint=schema)
+        except RuntimeError as e:
+            logger.error("Erreur LLM : %s", e)
+            error_response = {
+                "status": "error",
+                "intent": intent,
+                "answer": "Une erreur est survenue lors de la génération. Veuillez réessayer.",
+                "test_cases": [],
+                "ambiguities": [],
+                "sources": [],
+                "warnings": [str(e)],
+                "requires_human_validation": True,
+            }
+            store({"role": "assistant", "content": error_response["answer"]})
+            return error_response
 
-    # 6. Valider la sortie
+    # 8. Valider la sortie
     try:
         validate_output(response)
     except ValueError as e:
         logger.warning("Validation sortie échouée : %s", e)
         response["warnings"] = response.get("warnings", []) + [f"Validation: {e}"]
 
-    # 7. Filtrer les données sensibles
+    # 9. Filtrer les données sensibles
     response = filter_response(response)
 
-    # 8. Stocker la réponse
+    # 10. Stocker la réponse
     store({"role": "assistant", "content": response.get("answer", "")})
 
     logger.info(

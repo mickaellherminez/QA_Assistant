@@ -1,11 +1,12 @@
 {
   "scores": {
-    "context_precision": 0.583,
-    "faithfulness": 0.756,
-    "answer_relevancy": 0.931,
+    "context_precision": 0.55,
+    "faithfulness": 0.662,
+    "answer_relevancy": 0.923,
     "context_recall": 0.6
   },
-  "global_score": 0.718,
+  "global_score": 0.684,
   "n_samples": 5,
-  "model": "gpt-4o-mini"
+  "model": "gpt-4o-mini",
+  "embedding_model": "text-embedding-3-small"
 }

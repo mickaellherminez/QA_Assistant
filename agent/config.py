@@ -66,3 +66,9 @@ CHROMA_PERSIST_DIR: str = _resolve_path(os.getenv("CHROMA_PERSIST_DIR", "./chrom
 RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.10"))
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "5"))
 RAG_RERANKER_ENABLED: bool = os.getenv("RAG_RERANKER_ENABLED", "true").lower() == "true"
+
+# ── Langfuse (observabilité LLM) — optionnel ─────────────────────────────────
+# Laisser vide pour désactiver le tracing.
+LANGFUSE_PUBLIC_KEY: str | None = os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_SECRET_KEY: str | None = os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")

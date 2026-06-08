@@ -36,6 +36,7 @@ from config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL, ISTQB_DOCS_DIR, MODEL
 from main import agent
 from rag.vector_store import is_indexed
 from tools.user_stories import fetch_all, fetch_by_index
+from tracing import flush as langfuse_flush
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ ChromaDB opérationnelle.")
     yield
     logger.info("🛑 Arrêt du QA Assistant API")
+    langfuse_flush()  # envoyer les traces en attente avant la fermeture
 
 
 # ── Application ───────────────────────────────────────────────────────────────
@@ -146,7 +148,7 @@ async def ask(body: AskRequest) -> AskResponse:
     )
 
     try:
-        result = agent(body.question)
+        result = agent(body.question, session_id=body.session_id)
     except Exception as e:
         _metrics["requests_error"] += 1
         logger.error("Erreur dans agent() : %s", e, exc_info=True)

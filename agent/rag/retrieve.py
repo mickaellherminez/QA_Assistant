@@ -9,6 +9,10 @@ Pipeline :
   1. ChromaDB bi-encoder  → top-K chunks par similarité cosinus
   2. Filtrage par seuil   → RAG_SCORE_THRESHOLD (défaut 0.10)
   3. Cross-encoder rerank → réordonnancement précis (query ↔ passage)
+
+Langfuse :
+  retrieve() est décorée avec @observe(name="rag-retrieve") pour mesurer
+  la latence du pipeline RAG et tracer le nombre de chunks retenus.
 """
 
 import logging
@@ -18,6 +22,7 @@ from langchain_core.documents import Document
 
 from config import RAG_SCORE_THRESHOLD, RAG_TOP_K, RAG_RERANKER_ENABLED
 from rag.vector_store import get_or_create_store, is_indexed
+from tracing import observe
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,7 @@ class RetrievedChunk:
     language: str
 
 
+@observe(name="rag-retrieve")
 def retrieve(query: str) -> list[RetrievedChunk]:
     """
     Recherche les chunks ISTQB les plus pertinents pour une requête.

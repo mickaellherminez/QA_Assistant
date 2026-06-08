@@ -21,6 +21,7 @@
 11. [Tests](#11-tests)
 12. [Évaluation RAGAS](#12-évaluation-ragas)
 13. [Structure du projet](#13-structure-du-projet)
+14. [Observabilité — Langfuse](#14-observabilité--langfuse)
 
 ---
 
@@ -106,6 +107,7 @@ L'agent génère automatiquement, en **~15 secondes** :
 | 5. RAG ISTQB | ChromaDB + LangChain + reranker | Bonnes pratiques ISTQB |
 | 6. Génération | GPT-4o-mini (T=0) | Cas de test JSON |
 | 7. Sortie / Sécurité | Pydantic + regex | Validation JSON + masquage PII |
+| 8. Observabilité | Langfuse 4.6.1 | Traces LLM — latence, tokens, coût, sessions |
 
 ### Pipeline RAG détaillé
 
@@ -429,6 +431,7 @@ QA_Assistant/
 ├── docker-compose.yml                 # Services api + ingest
 ├── .dockerignore
 └── agent/
+    ├── tracing.py                     # Observabilité Langfuse (no-op si désactivé)
     ├── config.py                      # Configuration centralisée (.env)
     ├── llm.py                         # Abstraction LangChain / GPT-4o-mini
     ├── main.py                        # Orchestration ReAct (agent principal)
@@ -467,6 +470,54 @@ QA_Assistant/
     ├── pyproject.toml                 # Dépendances (uv)
     └── .env.example                   # Template de configuration
 ```
+
+## 14. Observabilité — Langfuse
+
+[Langfuse](https://langfuse.com) est intégré comme couche d'observabilité LLM : chaque appel au pipeline est tracé (latence, tokens, coût, session).
+
+### Hiérarchie de traces
+
+```text
+qa-agent  (trace racine — @observe)
+  ├── classify-intent     (span)
+  │     └── ChatOpenAI    (génération — tokens + modèle via CallbackHandler)
+  ├── fetch-user-stories  (span)
+  ├── rag-retrieve        (span — @observe)
+  └── ChatOpenAI          (génération réponse finale — via CallbackHandler)
+```
+
+### Activation
+
+Ajouter dans `agent/.env` :
+
+```env
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com   # optionnel (défaut cloud)
+```
+
+Si ces variables sont absentes, le module se désactive silencieusement : l'application fonctionne normalement, sans tracing.
+
+### Fichiers concernés
+
+| Fichier | Rôle |
+|---|---|
+| `agent/tracing.py` | Initialisation centralisée — exporte `observe`, `propagate_attributes`, `get_langfuse_handler`, `flush` |
+| `agent/llm.py` | Attache un `CallbackHandler` LangChain à chaque `call_llm()` |
+| `agent/main.py` | `agent()` décoré `@observe(name="qa-agent")` ; spans enfants pour classify et fetch |
+| `agent/rag/retrieve.py` | `retrieve()` décoré `@observe(name="rag-retrieve")` |
+| `agent/api.py` | Transmet `session_id` à `agent()` ; appelle `flush()` au shutdown |
+
+> **Règle d'import** : ne jamais importer `langfuse` directement dans les autres modules — toujours passer par `tracing.py` pour garantir la dégradation gracieuse.
+
+### Package
+
+```bash
+# Déjà inclus dans pyproject.toml
+langfuse>=3.0.0   # version installée : 4.6.1
+```
+
+---
 
 ## Tags git
 

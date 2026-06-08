@@ -2,15 +2,23 @@
 llm.py — Abstraction LLM via LangChain (ChatOpenAI).
 
 Deux fonctions publiques :
-  - call_llm(messages)          → str
-  - call_llm_json(messages)     → dict
+  - call_llm(messages, callbacks)      → str
+  - call_llm_json(messages, callbacks) → dict
 
 Le modèle, la température et les autres paramètres
 sont lus depuis config.py — ne pas les passer en dur ici.
+
+Langfuse :
+  Un CallbackHandler est automatiquement créé à chaque appel (si Langfuse est
+  activé) et passé à _llm.invoke() pour capturer le modèle, les tokens et la
+  latence. Il est rattaché au span @observe() courant via le contexte Langfuse.
 """
 
 import json
 import logging
+
+# ⚠️  Importer tracing AVANT les clients LLM pour initialiser le contexte Langfuse.
+from tracing import get_langfuse_handler
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -51,6 +59,9 @@ def call_llm(messages: list[dict]) -> str:
     """
     Appelle le LLM et retourne la réponse brute en texte.
 
+    Un CallbackHandler Langfuse est automatiquement attaché si le tracing
+    est activé, capturant le modèle, les tokens et la latence.
+
     Args:
         messages: liste de dicts {"role": "system|user|assistant", "content": "..."}
 
@@ -62,7 +73,12 @@ def call_llm(messages: list[dict]) -> str:
     """
     try:
         lc_msgs = _build_lc_messages(messages)
-        response = _llm.invoke(lc_msgs)
+
+        # Attacher le CallbackHandler Langfuse si activé (lié au span @observe courant)
+        lf_handler = get_langfuse_handler()
+        invoke_config = {"callbacks": [lf_handler]} if lf_handler else {}
+
+        response = _llm.invoke(lc_msgs, config=invoke_config)
         content = response.content
         logger.debug("LLM response (truncated): %s", content[:200])
         return content

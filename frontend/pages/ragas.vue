@@ -7,7 +7,6 @@ const selectedReport = ref<ReportKey>('reranker')
 const selectedModel = ref('gpt-4o-mini')
 const selectedEmbeddingModel = ref('text-embedding-3-small')
 const maxSamples = ref(5)
-const persistRun = ref(true)
 
 const isRunning = ref(false)
 const runError = ref('')
@@ -93,8 +92,7 @@ const scoreRows = computed(() => {
 
 const runSummary = computed(() => {
   if (!liveRun.value) return ''
-  const savedLabel = liveRun.value.persisted ? 'sauvegardé' : 'non sauvegardé'
-  return `Run terminé en ${liveRun.value.duration_ms} ms (${savedLabel}).`
+  return `Run terminé en ${liveRun.value.duration_ms} ms.`
 })
 
 watch(selectedReport, () => {
@@ -110,7 +108,7 @@ async function runRagasLive() {
       method: 'POST',
       body: {
         report: selectedReport.value,
-        persist_report: persistRun.value,
+        persist_report: true,
         model: selectedModel.value.trim() || undefined,
         embedding_model: selectedEmbeddingModel.value.trim() || undefined,
         max_samples: maxSamples.value
@@ -128,10 +126,6 @@ async function runRagasLive() {
   }
 }
 
-function refreshReport() {
-  liveRun.value = null
-  refresh()
-}
 </script>
 
 <template>
@@ -141,7 +135,7 @@ function refreshReport() {
       <p>Choix du modèle, benchmark en direct, et visualisation graphique des scores qualité RAG.</p>
     </div>
 
-    <div class="toolbar card ragas-toolbar">
+    <div class="toolbar card ragas-toolbar ragas-panel">
       <div class="toolbar-group">
         <label for="report">Rapport cible</label>
         <select id="report" v-model="selectedReport">
@@ -166,17 +160,11 @@ function refreshReport() {
         <input id="samples" v-model.number="maxSamples" type="number" min="1" max="25" />
       </div>
 
-      <label class="toggle-line">
-        <input v-model="persistRun" type="checkbox" />
-        <span>Sauvegarder le résultat dans le rapport</span>
-      </label>
-
       <div class="toolbar-actions">
         <button class="btn" :disabled="isRunning" @click="runRagasLive()">
           <span v-if="isRunning">Run en cours...</span>
-          <span v-else>Lancer le benchmark</span>
+          <span v-else>Lancer benchmark</span>
         </button>
-        <button class="btn ghost" :disabled="isRunning" @click="refreshReport()">Rafraîchir</button>
       </div>
     </div>
 
@@ -186,35 +174,37 @@ function refreshReport() {
     <p v-if="runSummary" class="state-line">{{ runSummary }}</p>
 
     <div v-if="effectiveData" class="ragas-grid">
-      <article class="card kpi-card score-gauge-card">
-        <p class="kpi-label">Global Score</p>
-        <div class="score-gauge">
-          <div class="score-gauge-ring" :style="gaugeStyle">
-            <div class="score-gauge-inner">
-              <strong>{{ globalScore.toFixed(3) }}</strong>
+      <div class="ragas-kpi-row">
+        <article class="card kpi-card ragas-kpi-card score-gauge-card">
+          <p class="kpi-label">Global Score</p>
+          <div class="score-gauge">
+            <div class="score-gauge-ring" :style="gaugeStyle">
+              <div class="score-gauge-inner">
+                <strong>{{ globalScore.toFixed(3) }}</strong>
+              </div>
             </div>
           </div>
-        </div>
-      </article>
+        </article>
 
-      <article class="card kpi-card">
-        <p class="kpi-label">Rapport</p>
-        <p class="kpi-value mono">{{ effectiveData.selected_report }}</p>
-        <p class="kpi-meta">Fichier: <code>{{ effectiveData.report_file }}</code></p>
-      </article>
+        <article class="card kpi-card ragas-kpi-card">
+          <p class="kpi-label">Rapport</p>
+          <p class="kpi-value mono">{{ effectiveData.selected_report }}</p>
+          <p class="kpi-meta">Fichier: <code>{{ effectiveData.report_file }}</code></p>
+        </article>
 
-      <article class="card kpi-card">
-        <p class="kpi-label">Model</p>
-        <p class="kpi-value mono">{{ effectiveData.model ?? 'N/A' }}</p>
-        <p class="kpi-meta">Embeddings: <code>{{ selectedEmbeddingModel }}</code></p>
-      </article>
+        <article class="card kpi-card ragas-kpi-card">
+          <p class="kpi-label">Model</p>
+          <p class="kpi-value mono">{{ effectiveData.model ?? 'N/A' }}</p>
+          <p class="kpi-meta">Embeddings: <code>{{ selectedEmbeddingModel }}</code></p>
+        </article>
 
-      <article class="card kpi-card">
-        <p class="kpi-label">Samples</p>
-        <p class="kpi-value">{{ effectiveData.n_samples ?? 'N/A' }}</p>
-      </article>
+        <article class="card kpi-card ragas-kpi-card">
+          <p class="kpi-label">Samples</p>
+          <p class="kpi-value">{{ effectiveData.n_samples ?? 'N/A' }}</p>
+        </article>
+      </div>
 
-      <article class="card kpi-card ragas-score-card">
+      <article class="card kpi-card ragas-score-card ragas-panel">
         <p class="kpi-label">Scores détaillés</p>
         <ul class="metric-bars">
           <li v-for="metric in scoreRows" :key="metric.name">
